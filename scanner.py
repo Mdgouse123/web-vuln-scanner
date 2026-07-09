@@ -309,6 +309,241 @@ def export_json(url, all_results, findings):
     console.print(f"\n  [green]âœ” JSON report:[/green] [white]{path}[/white]")
 
 
+def export_pdf(url, all_results, findings):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+    )
+
+    os.makedirs("reports", exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    host = urlparse(normalize_url(url)).hostname or "unknown"
+    path = f"reports/scan_{host}_{ts}.pdf"
+
+    doc = SimpleDocTemplate(
+        path, pagesize=A4,
+        leftMargin=2*cm, rightMargin=2*cm,
+        topMargin=2*cm, bottomMargin=2*cm,
+    )
+
+    styles = getSampleStyleSheet()
+    style_title   = ParagraphStyle("title",   fontSize=20, textColor=colors.HexColor("#38bdf8"), spaceAfter=6, fontName="Helvetica-Bold")
+    style_sub     = ParagraphStyle("sub",     fontSize=9,  textColor=colors.HexColor("#94a3b8"), spaceAfter=14)
+    style_h2      = ParagraphStyle("h2",      fontSize=13, textColor=colors.HexColor("#7dd3fc"), spaceBefore=16, spaceAfter=6, fontName="Helvetica-Bold")
+    style_body    = ParagraphStyle("body",    fontSize=9,  textColor=colors.HexColor("#e2e8f0"), spaceAfter=4)
+    style_label   = ParagraphStyle("label",   fontSize=9,  textColor=colors.HexColor("#94a3b8"))
+    style_ok      = ParagraphStyle("ok",      fontSize=9,  textColor=colors.HexColor("#22c55e"), spaceAfter=4)
+    style_warn    = ParagraphStyle("warn",    fontSize=9,  textColor=colors.HexColor("#facc15"), spaceAfter=4)
+    style_danger  = ParagraphStyle("danger",  fontSize=9,  textColor=colors.HexColor("#ef4444"), spaceAfter=4)
+    style_footer  = ParagraphStyle("footer",  fontSize=8,  textColor=colors.HexColor("#475569"), spaceBefore=20)
+
+    BG = colors.HexColor("#0f172a")
+    SEV_COLORS = {
+        "CRITICAL": colors.HexColor("#dc2626"),
+        "HIGH":     colors.HexColor("#ea580c"),
+        "MEDIUM":   colors.HexColor("#d97706"),
+        "LOW":      colors.HexColor("#0891b2"),
+        "INFO":     colors.HexColor("#6b7280"),
+    }
+
+    story = []
+    base = all_results.get("base_info", {})
+    ssl_info = all_results.get("ssl", {})
+
+    # --- Title ---
+    story.append(Paragraph("Web Vulnerability Scan Report", style_title))
+    story.append(Paragraph(
+        f"Target: <b>{url}</b> &nbsp;&nbsp; | &nbsp;&nbsp; "
+        f"Scan Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} &nbsp;&nbsp; | &nbsp;&nbsp; "
+        f"Status: {base.get('status_code','N/A')} &nbsp;&nbsp; "
+        f"Server: {base.get('server','N/A')} &nbsp;&nbsp; "
+        f"Response: {base.get('response_time_ms','N/A')} ms",
+        style_sub
+    ))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#1e3a5f")))
+
+    # --- Target Info ---
+    story.append(Paragraph("Target Info", style_h2))
+    info_data = [
+        ["URL", base.get("url", "N/A")],
+        ["Final URL", base.get("final_url", "N/A")],
+        ["Status Code", str(base.get("status_code", "N/A"))],
+        ["Server", base.get("server", "N/A")],
+        ["Content-Type", base.get("content_type", "N/A")],
+        ["Response Time", f"{base.get('response_time_ms','N/A')} ms"],
+    ]
+    t_info = Table(info_data, colWidths=[4*cm, 13*cm])
+    t_info.setStyle(TableStyle([
+        ("BACKGROUND",  (0,0), (-1,-1), colors.HexColor("#0f172a")),
+        ("TEXTCOLOR",   (0,0), (0,-1),  colors.HexColor("#94a3b8")),
+        ("TEXTCOLOR",   (1,0), (1,-1),  colors.HexColor("#e2e8f0")),
+        ("FONTSIZE",    (0,0), (-1,-1), 9),
+        ("ROWBACKGROUNDS", (0,0), (-1,-1), [colors.HexColor("#0f172a"), colors.HexColor("#1e293b")]),
+        ("GRID",        (0,0), (-1,-1), 0.3, colors.HexColor("#1e3a5f")),
+        ("PADDING",     (0,0), (-1,-1), 5),
+    ]))
+    story.append(t_info)
+
+    # --- SSL ---
+    story.append(Paragraph("SSL / TLS Certificate", style_h2))
+    if ssl_info.get("error"):
+        story.append(Paragraph(f"[X] SSL Error: {ssl_info['error']}", style_danger))
+    elif ssl_info.get("days_remaining") is None:
+        story.append(Paragraph("Not applicable (HTTP).", style_label))
+    else:
+        days = ssl_info["days_remaining"]
+        day_style = style_ok if days > 30 else (style_warn if days > 7 else style_danger)
+        story.append(Paragraph(f"[OK] Certificate valid  |  Issuer: {ssl_info['ssl_issuer']}", style_ok))
+        story.append(Paragraph(f"Expires: {ssl_info['ssl_expiry']}  ({days} days remaining)", day_style))
+
+    # --- Security Headers ---
+    story.append(Paragraph("Security Headers", style_h2))
+    hr = all_results.get("headers", {})
+    if "error" not in hr:
+        score, max_score = hr.get("score", 0), hr.get("max_score", 1)
+        pct = int((score / max_score) * 100)
+        sc_style = style_ok if pct >= 70 else (style_warn if pct >= 40 else style_danger)
+        story.append(Paragraph(f"Header Score: {score}/{max_score}  ({pct}%)", sc_style))
+
+        missing = hr.get("missing", [])
+        if missing:
+            story.append(Paragraph("Missing Headers:", style_warn))
+            mdata = [["Severity", "Header", "Recommendation"]]
+            for h in missing:
+                mdata.append([h["severity"], h["header"], h["recommendation"]])
+            mt = Table(mdata, colWidths=[2.5*cm, 5*cm, 9.5*cm])
+            mt.setStyle(TableStyle([
+                ("BACKGROUND",  (0,0), (-1,0),  colors.HexColor("#1e3a5f")),
+                ("TEXTCOLOR",   (0,0), (-1,0),  colors.HexColor("#bae6fd")),
+                ("FONTSIZE",    (0,0), (-1,-1), 8),
+                ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.HexColor("#0f172a"), colors.HexColor("#1e293b")]),
+                ("TEXTCOLOR",   (0,1), (-1,-1), colors.HexColor("#e2e8f0")),
+                ("GRID",        (0,0), (-1,-1), 0.3, colors.HexColor("#1e3a5f")),
+                ("PADDING",     (0,0), (-1,-1), 4),
+                ("FONTNAME",    (0,0), (-1,0),  "Helvetica-Bold"),
+            ]))
+            story.append(mt)
+
+        present = hr.get("present", [])
+        if present:
+            story.append(Spacer(1, 6))
+            story.append(Paragraph("Present Headers:", style_ok))
+            for h in present:
+                story.append(Paragraph(f"[OK] {h['header']}: {h['value'][:80]}", style_body))
+
+        disc = hr.get("discouraged", [])
+        if disc:
+            story.append(Spacer(1, 6))
+            story.append(Paragraph("Information Disclosure Headers:", style_warn))
+            for h in disc:
+                story.append(Paragraph(f"[!] {h['header']}: {h['value']}  —  {h['recommendation']}", style_warn))
+
+    # --- Sensitive Files ---
+    story.append(Paragraph("Sensitive Files & Directories", style_h2))
+    sf = all_results.get("sensitive_files", {})
+    found_files = sf.get("found", [])
+    story.append(Paragraph(
+        f"Probed {sf.get('checked', 0)} paths — found {len(found_files)} exposed.",
+        style_danger if found_files else style_ok
+    ))
+    if found_files:
+        fdata = [["Severity", "Path", "Status", "Description"]]
+        for item in found_files:
+            fdata.append([item["severity"], item["path"], str(item["status_code"]), item["description"][:60]])
+        ft = Table(fdata, colWidths=[2.2*cm, 4*cm, 1.8*cm, 9*cm])
+        ft.setStyle(TableStyle([
+            ("BACKGROUND",  (0,0), (-1,0),  colors.HexColor("#1e3a5f")),
+            ("TEXTCOLOR",   (0,0), (-1,0),  colors.HexColor("#bae6fd")),
+            ("FONTSIZE",    (0,0), (-1,-1), 8),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.HexColor("#0f172a"), colors.HexColor("#1e293b")]),
+            ("TEXTCOLOR",   (0,1), (-1,-1), colors.HexColor("#e2e8f0")),
+            ("GRID",        (0,0), (-1,-1), 0.3, colors.HexColor("#1e3a5f")),
+            ("PADDING",     (0,0), (-1,-1), 4),
+            ("FONTNAME",    (0,0), (-1,0),  "Helvetica-Bold"),
+        ]))
+        story.append(ft)
+
+    # --- SQLi ---
+    story.append(Paragraph("SQL Injection Detection", style_h2))
+    sqli = all_results.get("sqli", {})
+    if not sqli.get("has_params"):
+        story.append(Paragraph("No query parameters in URL. Skipping.", style_label))
+    elif not sqli.get("vulnerable_params"):
+        story.append(Paragraph("[OK] No SQL injection errors detected.", style_ok))
+    else:
+        for v in sqli["vulnerable_params"]:
+            story.append(Paragraph(f"[X] Parameter: {v['param']}  |  Payload: {v['payload']}  |  Signature: {v['matched_signature']}", style_danger))
+
+    # --- XSS ---
+    story.append(Paragraph("XSS Detection", style_h2))
+    xss = all_results.get("xss", {})
+    if not xss.get("has_params"):
+        story.append(Paragraph("No query parameters in URL. Skipping.", style_label))
+    elif not xss.get("vulnerable_params"):
+        story.append(Paragraph("[OK] No reflected XSS detected.", style_ok))
+    else:
+        for v in xss["vulnerable_params"]:
+            story.append(Paragraph(f"[X] Parameter: {v['param']}  |  Payload: {v['payload']}", style_danger))
+
+    # --- Open Redirect ---
+    story.append(Paragraph("Open Redirect Detection", style_h2))
+    redir = all_results.get("open_redirect", {})
+    if not redir.get("vulnerable_params"):
+        story.append(Paragraph("[OK] No open redirect vulnerabilities detected.", style_ok))
+    else:
+        for v in redir["vulnerable_params"]:
+            story.append(Paragraph(f"[X] Parameter: {v['param']}  |  Payload: {v['payload']}", style_danger))
+
+    # --- Summary ---
+    story.append(Paragraph("Scan Summary", style_h2))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#1e3a5f")))
+    if not findings:
+        story.append(Paragraph("[OK] No significant vulnerabilities detected!", style_ok))
+    else:
+        sdata = [["Severity", "Finding"]]
+        for sev, desc in findings:
+            sdata.append([sev, desc])
+        st = Table(sdata, colWidths=[2.5*cm, 14.5*cm])
+        st.setStyle(TableStyle([
+            ("BACKGROUND",  (0,0), (-1,0),  colors.HexColor("#1e3a5f")),
+            ("TEXTCOLOR",   (0,0), (-1,0),  colors.HexColor("#bae6fd")),
+            ("FONTSIZE",    (0,0), (-1,-1), 9),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.HexColor("#0f172a"), colors.HexColor("#1e293b")]),
+            ("GRID",        (0,0), (-1,-1), 0.3, colors.HexColor("#1e3a5f")),
+            ("PADDING",     (0,0), (-1,-1), 5),
+            ("FONTNAME",    (0,0), (-1,0),  "Helvetica-Bold"),
+        ]))
+        # Color severity column per row
+        for i, (sev, _) in enumerate(findings, start=1):
+            st.setStyle(TableStyle([
+                ("TEXTCOLOR", (0,i), (0,i), SEV_COLORS.get(sev, colors.white)),
+                ("TEXTCOLOR", (1,i), (1,i), colors.HexColor("#e2e8f0")),
+                ("FONTNAME",  (0,i), (0,i), "Helvetica-Bold"),
+            ]))
+        story.append(st)
+        story.append(Paragraph(f"Total findings: {len(findings)}", style_danger))
+
+    story.append(Spacer(1, 12))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#1e3a5f")))
+    story.append(Paragraph(
+        "Generated by WebVulnScanner v1.0 — For authorized security testing only.",
+        style_footer
+    ))
+
+    # Build with dark background on every page
+    def dark_bg(canvas, doc):
+        canvas.saveState()
+        canvas.setFillColor(colors.HexColor("#0f172a"))
+        canvas.rect(0, 0, A4[0], A4[1], fill=1, stroke=0)
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=dark_bg, onLaterPages=dark_bg)
+    console.print(f"  [green][OK] PDF report:[/green] [white]{path}[/white]")
+
+
 def export_html(url, all_results, findings):
     os.makedirs("reports", exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -401,10 +636,12 @@ def run_scan(url, report_format=None):
     print_redirect_report(all_results["open_redirect"])
     findings = print_summary(all_results)
 
-    if report_format in ("json", "both"):
+    if report_format in ("json", "both", "all"):
         export_json(url, all_results, findings)
-    if report_format in ("html", "both"):
+    if report_format in ("html", "both", "all"):
         export_html(url, all_results, findings)
+    if report_format in ("pdf", "all"):
+        export_pdf(url, all_results, findings)
 
     console.print()
 
@@ -437,9 +674,9 @@ WARNING: Only use on systems you own or have explicit written permission to test
     parser.add_argument("url", help="Target URL (e.g. https://example.com)")
     parser.add_argument(
         "--report",
-        choices=["json", "html", "both"],
+        choices=["json", "html", "pdf", "both", "all"],
         default=None,
-        help="Export results to a report file",
+        help="Export results: json, html, pdf, both (html+json), all (html+json+pdf)",
     )
     args = parser.parse_args()
 

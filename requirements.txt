@@ -4,3 +4,4 @@ rich==13.7.1
 urllib3==2.2.1
 certifi==2024.2.2
 colorama==0.4.6
+reportlab==4.2.2
