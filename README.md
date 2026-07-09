@@ -62,7 +62,7 @@ A Python-based CLI tool that scans web applications for common security vulnerab
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/web-vuln-scanner.git
+git clone https://github.com/Mdgouse123/web-vuln-scanner.git
 cd web-vuln-scanner
 
 # Install dependencies
