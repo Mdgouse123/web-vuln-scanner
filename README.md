@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/a7777217-84d4-400c-b05c-1fc982226e05
+
 # Web Vulnerability Scanner
 
 A Python-based CLI tool that scans web applications for common security vulnerabilities. Built for educational purposes and authorized security testing.
