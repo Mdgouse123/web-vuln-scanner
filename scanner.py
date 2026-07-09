@@ -922,6 +922,8 @@ def run_scan(url, report_format=None):
         export_html(url, all_results, findings)
     if report_format in ("pdf", "all"):
         export_pdf(url, all_results, findings)
+    if report_format in ("docx", "all"):
+        export_docx(url, all_results, findings)
 
     console.print()
 
@@ -954,9 +956,9 @@ WARNING: Only use on systems you own or have explicit written permission to test
     parser.add_argument("url", help="Target URL (e.g. https://example.com)")
     parser.add_argument(
         "--report",
-        choices=["json", "html", "pdf", "both", "all"],
+        choices=["json", "html", "pdf", "docx", "both", "all"],
         default=None,
-        help="Export results: json, html, pdf, both (html+json), all (html+json+pdf)",
+        help="Export results: json, html, pdf, docx, both (html+json), all (json+html+pdf+docx)",
     )
     args = parser.parse_args()
 
