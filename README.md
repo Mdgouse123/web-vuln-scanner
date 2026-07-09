@@ -74,6 +74,9 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
+#general command to run any vuln website
+python scanner.py "website link" --report all
+
 # Basic scan — terminal output only
 python scanner.py https://example.com
 
