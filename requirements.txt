@@ -1,0 +1,6 @@
+requests==2.31.0
+beautifulsoup4==4.12.3
+rich==13.7.1
+urllib3==2.2.1
+certifi==2024.2.2
+colorama==0.4.6
