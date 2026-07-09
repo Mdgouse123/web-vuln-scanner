@@ -1,4 +1,4 @@
-"""
+﻿"""
 scanner.py - Main CLI entry point for the Web Vulnerability Scanner.
 Usage: python scanner.py <url> [--report json|html|both]
 """
@@ -7,6 +7,12 @@ import argparse
 import json
 import sys
 import os
+
+# Fix Windows terminal encoding so rich output renders correctly
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 from datetime import datetime
 from urllib.parse import urlparse
 
@@ -35,11 +41,11 @@ SEVERITY_COLORS = {
 }
 
 SEVERITY_ICONS = {
-    "CRITICAL": "[bold red]✖ CRITICAL[/bold red]",
-    "HIGH": "[red]● HIGH[/red]",
-    "MEDIUM": "[yellow]◆ MEDIUM[/yellow]",
-    "LOW": "[cyan]▸ LOW[/cyan]",
-    "INFO": "[dim]ℹ INFO[/dim]",
+    "CRITICAL": "[bold red][X] CRITICAL[/bold red]",
+    "HIGH": "[red][!] HIGH[/red]",
+    "MEDIUM": "[yellow][~] MEDIUM[/yellow]",
+    "LOW": "[cyan][>] LOW[/cyan]",
+    "INFO": "[dim][i] INFO[/dim]",
 }
 
 SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
@@ -91,21 +97,21 @@ def print_base_info(info):
     t.add_row("Content-Type", info["content_type"])
     t.add_row("Response Time", f"{info['response_time_ms']} ms")
     if len(info["redirect_chain"]) > 1:
-        t.add_row("Redirects", " → ".join(info["redirect_chain"]))
+        t.add_row("Redirects", " â†’ ".join(info["redirect_chain"]))
     console.print(t)
 
 
 def print_ssl_info(ssl_info):
     section("SSL / TLS Certificate")
     if ssl_info.get("error"):
-        console.print(f"  [red]✖ SSL Error:[/red] {ssl_info['error']}")
+        console.print(f"  [red]âœ– SSL Error:[/red] {ssl_info['error']}")
         return
     days = ssl_info.get("days_remaining")
     if days is None:
         console.print("  [dim]Not applicable (HTTP).[/dim]")
         return
     color = "green" if days > 30 else ("yellow" if days > 7 else "red")
-    console.print(f"  [green]✔[/green] Certificate valid")
+    console.print(f"  [green]âœ”[/green] Certificate valid")
     console.print(f"  Issuer:  [white]{ssl_info['ssl_issuer']}[/white]")
     console.print(
         f"  Expires: [{color}]{ssl_info['ssl_expiry']}[/{color}]"
@@ -134,7 +140,7 @@ def print_headers_report(result):
         console.print("  [bold green]Present Headers:[/bold green]")
         for h in result["present"]:
             console.print(
-                f"    [green]✔[/green] [white]{h['header']}[/white]: "
+                f"    [green]âœ”[/green] [white]{h['header']}[/white]: "
                 f"[dim]{h['value'][:80]}[/dim]"
             )
 
@@ -155,11 +161,11 @@ def print_sensitive_files_report(result):
     found = result["found"]
     color = "red" if found else "green"
     console.print(
-        f"  Probed [white]{result['checked']}[/white] paths — "
+        f"  Probed [white]{result['checked']}[/white] paths â€” "
         f"found [{color}]{len(found)}[/{color}] exposed.\n"
     )
     if not found:
-        console.print("  [green]✔ No sensitive files exposed.[/green]")
+        console.print("  [green]âœ” No sensitive files exposed.[/green]")
         return
     for item in found:
         sc_color = "green" if item["status_code"] == 200 else "yellow"
@@ -184,11 +190,11 @@ def print_sqli_report(result):
         return
     console.print(f"  Tested params: [white]{', '.join(result['tested_params'])}[/white]\n")
     if not result["vulnerable_params"]:
-        console.print("  [green]✔ No SQL injection errors detected.[/green]")
+        console.print("  [green]âœ” No SQL injection errors detected.[/green]")
         return
     console.print("  [bold red]Potential SQL Injection Found:[/bold red]")
     for v in result["vulnerable_params"]:
-        console.print(f"    [red]✖[/red] Parameter: [white]{v['param']}[/white]")
+        console.print(f"    [red]âœ–[/red] Parameter: [white]{v['param']}[/white]")
         console.print(f"      Payload:   [dim]{v['payload']}[/dim]")
         console.print(f"      Triggered: [dim]{v['matched_signature']}[/dim]")
         console.print(f"      URL:       [dim]{v['injected_url'][:100]}[/dim]\n")
@@ -205,11 +211,11 @@ def print_xss_report(result):
         return
     console.print(f"  Tested params: [white]{', '.join(result['tested_params'])}[/white]\n")
     if not result["vulnerable_params"]:
-        console.print("  [green]✔ No reflected XSS detected.[/green]")
+        console.print("  [green]âœ” No reflected XSS detected.[/green]")
         return
     console.print("  [bold red]Potential Reflected XSS Found:[/bold red]")
     for v in result["vulnerable_params"]:
-        console.print(f"    [red]✖[/red] Parameter: [white]{v['param']}[/white]")
+        console.print(f"    [red]âœ–[/red] Parameter: [white]{v['param']}[/white]")
         console.print(f"      Payload: [dim]{v['payload']}[/dim]")
         console.print(f"      URL:     [dim]{v['injected_url'][:100]}[/dim]\n")
 
@@ -220,11 +226,11 @@ def print_redirect_report(result):
         console.print(f"  [red]Error:[/red] {result['error']}")
         return
     if not result["vulnerable_params"]:
-        console.print("  [green]✔ No open redirect vulnerabilities detected.[/green]")
+        console.print("  [green]âœ” No open redirect vulnerabilities detected.[/green]")
         return
     console.print("  [bold red]Open Redirect Found:[/bold red]")
     for v in result["vulnerable_params"]:
-        console.print(f"    [red]✖[/red] Parameter: [white]{v['param']}[/white]")
+        console.print(f"    [red]âœ–[/red] Parameter: [white]{v['param']}[/white]")
         console.print(f"      Payload: [dim]{v['payload']}[/dim]")
         console.print(f"      URL:     [dim]{v['injected_url'][:100]}[/dim]\n")
 
@@ -245,13 +251,13 @@ def build_findings(all_results):
         findings.append((f["severity"], f"Exposed file: {f['path']} [{f['status_code']}]"))
 
     for v in all_results.get("sqli", {}).get("vulnerable_params", []):
-        findings.append(("HIGH", f"SQL Injection — param: {v['param']}"))
+        findings.append(("HIGH", f"SQL Injection â€” param: {v['param']}"))
 
     for v in all_results.get("xss", {}).get("vulnerable_params", []):
-        findings.append(("HIGH", f"Reflected XSS — param: {v['param']}"))
+        findings.append(("HIGH", f"Reflected XSS â€” param: {v['param']}"))
 
     for v in all_results.get("open_redirect", {}).get("vulnerable_params", []):
-        findings.append(("MEDIUM", f"Open Redirect — param: {v['param']}"))
+        findings.append(("MEDIUM", f"Open Redirect â€” param: {v['param']}"))
 
     ssl_info = all_results.get("ssl", {})
     if ssl_info.get("error"):
@@ -268,7 +274,7 @@ def print_summary(all_results):
     findings = build_findings(all_results)
 
     if not findings:
-        console.print("  [bold green]✔ No significant vulnerabilities detected![/bold green]")
+        console.print("  [bold green]âœ” No significant vulnerabilities detected![/bold green]")
     else:
         t = Table(box=box.SIMPLE_HEAD, show_header=True, header_style="bold white")
         t.add_column("Severity", width=12)
@@ -300,7 +306,7 @@ def export_json(url, all_results, findings):
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, default=str)
-    console.print(f"\n  [green]✔ JSON report:[/green] [white]{path}[/white]")
+    console.print(f"\n  [green]âœ” JSON report:[/green] [white]{path}[/white]")
 
 
 def export_html(url, all_results, findings):
@@ -323,7 +329,7 @@ def export_html(url, all_results, findings):
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Scan Report — {url}</title>
+  <title>Scan Report â€” {url}</title>
   <style>
     body{{font-family:'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:24px}}
     h1{{color:#38bdf8}}h2{{color:#7dd3fc;border-bottom:1px solid #1e3a5f;padding-bottom:6px}}
@@ -344,17 +350,17 @@ def export_html(url, all_results, findings):
     <strong>Server:</strong> {base.get('server','N/A')} &nbsp;|&nbsp;
     <strong>Response:</strong> {base.get('response_time_ms','N/A')} ms
   </div>
-  <h2>Summary — {len(findings)} Finding(s)</h2>
+  <h2>Summary â€” {len(findings)} Finding(s)</h2>
   <table>
     <tr><th>Severity</th><th>Finding</th></tr>
     {rows or '<tr><td colspan="2" style="color:#22c55e">No significant vulnerabilities detected.</td></tr>'}
   </table>
-  <div class="footer">Generated by WebVulnScanner v1.0 — For authorized security testing only.</div>
+  <div class="footer">Generated by WebVulnScanner v1.0 â€” For authorized security testing only.</div>
 </body>
 </html>"""
     with open(path, "w", encoding="utf-8") as f:
         f.write(html)
-    console.print(f"  [green]✔ HTML report:[/green] [white]{path}[/white]")
+    console.print(f"  [green]âœ” HTML report:[/green] [white]{path}[/white]")
 
 
 # ---------------------------------------------------------------------------
@@ -439,7 +445,7 @@ WARNING: Only use on systems you own or have explicit written permission to test
 
     console.print()
     console.print(
-        "[bold yellow]⚠  Legal Notice:[/bold yellow] Only scan systems you own "
+        "[bold yellow]! Legal Notice:[/bold yellow] Only scan systems you own "
         "or have explicit written permission to test.\n"
     )
 
@@ -452,3 +458,4 @@ WARNING: Only use on systems you own or have explicit written permission to test
 
 if __name__ == "__main__":
     main()
+
